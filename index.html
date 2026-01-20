@@ -475,16 +475,18 @@
     
     const Engine = {
         // --- CONFIGURATION ---
-        // GENESIS TIME: Fixed to Jan 1, 2024 (1704067200000)
-        // This ensures the profit accumulates based on real world time elapsed
-        GENESIS_TIME: 1704067200000, 
+        // GENESIS TIME: Fixed to January 15, 2026 
+        // This ensures the profit accumulates based on real world time elapsed from this date.
+        // It will never reset.
+        GENESIS_TIME: 1768435200000, 
         
         START_PRINCIPAL: 5010.00,
         currentBal: 0, 
         sessionProfit: 0.00,
         
-        // Very small rate because diff is large (years/months), results in ~$120-200 range
-        GROWTH_RATE: 0.0000045, 
+        // Target: $100 - $260 per week (Avg $180/week)
+        // $180 / 7 days / 86400 sec = ~0.0002976 USD/second
+        GROWTH_RATE: 0.0002976, 
         
         // State
         chartData: [],
@@ -492,7 +494,7 @@
         init() {
             // CALCULATE PERSISTENT BALANCE ON LOAD
             const now = Date.now();
-            // Seconds elapsed since Genesis (Jan 2024)
+            // Seconds elapsed since Genesis
             const elapsed = (now - this.GENESIS_TIME) / 1000;
             
             // Profit = Time * Rate
