@@ -475,16 +475,18 @@
     
     const Engine = {
         // --- CONFIGURATION ---
-        bootTime: Date.now(), // Track when session started
-        START_BALANCE: 5010.00, // FIXED EXACT START
+        bootTime: Date.now(), 
+        START_BALANCE: 5010.00,
+        currentBal: 5010.00,
+        sessionProfit: 0.00,
         
-        // Target: $180/week (Midpoint of 100-260)
-        // $180 / 7 days / 24 hours / 60 mins / 60 seconds
-        GROWTH_PER_MS: 0.000297619, 
+        // PROFIT LOGIC:
+        // Target: $120 - $280 / week
+        // Avg: $200 / week ~= $0.00033 / second
+        // Strategy: Volatility (Up/Down) but with positive drift.
         
         // State
         chartData: [],
-        lastVal: 0,
         
         init() {
             this.initCanvas();
@@ -501,23 +503,6 @@
                 const now = new Date();
                 document.getElementById('clock').innerText = now.toISOString().split('T')[1].split('.')[0] + " UTC";
             }, 1000);
-        },
-
-        // --- CORE MATH ---
-        getCurrentBalance() {
-            const now = Date.now();
-            // Start counting PROFIT from the moment the page opens (bootTime)
-            // This ensures balance starts exactly at START_BALANCE (5010.00)
-            const timeDiff = now - this.bootTime; 
-            const organicGrowth = timeDiff * this.GROWTH_PER_MS;
-            
-            // Add "Breathing" Noise (Sine Wave)
-            const noise = (Math.sin(now / 2000) * 0.05) + (Math.cos(now / 500) * 0.02);
-            
-            return {
-                total: this.START_BALANCE + organicGrowth + noise,
-                pnlToday: 0.35 + (organicGrowth) // Small fake start PNL
-            };
         },
 
         // --- AUTHENTICATION ---
@@ -550,27 +535,64 @@
 
         // --- RUNTIME ---
         startLiveEngine() {
-            // Pre-fill chart with history
+            // Pre-fill chart with history (Random Walk)
             this.genHistory();
             
+            // Run Loop every 3 seconds for realistic volatility
             setInterval(() => {
-                const data = this.getCurrentBalance();
-                
-                // Update Text
-                const fmt = (n) => n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
-                
-                document.getElementById('main-bal').innerText = fmt(data.total);
-                document.getElementById('side-usd').innerText = fmt(data.total);
-                document.getElementById('main-pnl').innerText = "+" + fmt(data.pnlToday);
-                document.getElementById('modal-bal').innerText = fmt(data.total) + " USDT";
+                this.tick();
+            }, 3000);
 
-                // Update Chart
-                this.updateChart(data.total);
+            // Update UI loop (faster for clock/feel)
+            setInterval(() => {
+               this.updateUI(); 
+            }, 1000);
+        },
 
-                // Random Ledger Entries
-                if(Math.random() > 0.85) this.addLog(data.total);
+        // --- CORE MATH & LOGIC ---
+        tick() {
+            // Determine volatility (Up or Down)
+            // Bias: 60% Up, 40% Down to ensure long-term profit of ~0.00033/sec
+            
+            const volatility = Math.random();
+            let change = 0;
+            let type = "";
 
-            }, 1000); // 1 Second tick
+            if (volatility > 0.35) {
+                // WIN (Gain 0.0050 to 0.0150)
+                change = (Math.random() * 0.010) + 0.0050;
+                type = "YIELD";
+            } else {
+                // LOSS (Lose 0.0010 to 0.0080)
+                change = -((Math.random() * 0.007) + 0.0010);
+                type = "GAS";
+            }
+            
+            // Apply to Balance
+            this.currentBal += change;
+            this.sessionProfit += change;
+
+            // Update Chart
+            this.updateChart(this.currentBal);
+
+            // Add to Ledger (Synced with ACTUAL movement)
+            this.addLog(change, type);
+        },
+
+        updateUI() {
+            const fmt = (n) => n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            
+            // Main Balance
+            document.getElementById('main-bal').innerText = fmt(this.currentBal);
+            document.getElementById('side-usd').innerText = fmt(this.currentBal);
+            
+            // PNL (Today/Session)
+            const pnl = document.getElementById('main-pnl');
+            pnl.innerText = (this.sessionProfit >= 0 ? "+" : "") + fmt(this.sessionProfit);
+            pnl.style.color = this.sessionProfit >= 0 ? "var(--col-usdt)" : "var(--col-danger)";
+
+            // Modal
+            document.getElementById('modal-bal').innerText = fmt(this.currentBal) + " USDT";
         },
 
         // --- WITHDRAWALS ---
@@ -666,46 +688,65 @@
             }, 4000);
         },
 
-        addLog(currentTotal) {
+        addLog(amount, type) {
             const con = document.getElementById('tx-log');
-            // 90% Win (Yield), 10% Loss (Gas/Fees) - Realistic
-            const isWin = Math.random() > 0.15;
-            const amt = (Math.random() * 0.05).toFixed(4);
+            const isWin = amount > 0;
             const hash = Math.random().toString(36).substring(2,10).toUpperCase();
             
             const div = document.createElement('div');
             div.className = 'list-item';
             div.innerHTML = `
                 <div class="flex gap-2 items-center">
-                    <span class="badge" style="${isWin?'color:var(--col-usdt)':'color:var(--col-text-muted)'}">${isWin ? 'YIELD' : 'GAS'}</span>
+                    <span class="badge" style="${isWin?'color:var(--col-usdt)':'color:var(--col-danger)'}">${type}</span>
                     <span class="text-mono text-xs text-muted">T${hash}</span>
                 </div>
                 <div class="text-mono ${isWin ? 'text-green' : 'text-red'}">
-                    ${isWin ? '+' : '-'}${amt} USDT
+                    ${isWin ? '+' : ''}${amount.toFixed(4)} USDT
                 </div>
             `;
+            
+            // Animation for new item
+            div.style.opacity = '0';
+            div.style.transform = 'translateY(-10px)';
+            div.style.transition = '0.3s';
+            
             con.prepend(div);
-            if(con.children.length > 6) con.lastChild.remove();
+            
+            // Trigger anim
+            setTimeout(() => {
+                div.style.opacity = '1';
+                div.style.transform = 'translateY(0)';
+            }, 50);
+
+            if(con.children.length > 8) con.lastChild.remove();
         },
 
         // --- CANVAS & CHARTS ---
         genHistory() {
-            // FIX: Generate "fake" history that ends exactly at the START_BALANCE
-            // This ensures the chart looks good, but the number is correct (5010)
-            let now = Date.now();
+            // Generate REALISTIC random walk history
+            // Start from 5010 and walk BACKWARDS to create the history array
+            // This ensures the line connects perfectly to the live data
             
-            for(let i=60; i>0; i--) {
-                // Calculate BACKWARDS from 5010
-                // Value = 5010 - (growth * minutes_ago)
-                let timeOffset = i * 60000; // minutes ago in ms
-                let growthSinceThen = timeOffset * this.GROWTH_PER_MS;
+            let simBal = this.START_BALANCE;
+            let tempArr = [];
+            
+            for(let i=0; i<60; i++) {
+                tempArr.push(simBal);
                 
-                let val = this.START_BALANCE - growthSinceThen;
+                // Inverse logic of the Tick function to walk backwards
+                const volatility = Math.random();
+                let change = 0;
                 
-                // Add noise
-                let noise = (Math.sin(i) * 0.05);
-                this.chartData.push(val + noise);
+                if (volatility > 0.40) { // Slight bias in history too
+                    change = (Math.random() * 0.010) + 0.0050; // Was a gain
+                    simBal -= change; // Subtract because we go back in time
+                } else {
+                    change = -((Math.random() * 0.007) + 0.0010); // Was a loss
+                    simBal -= change; // Add (double negative) because we go back
+                }
             }
+            // Reverse so index 0 is old, index 60 is now
+            this.chartData = tempArr.reverse();
         },
 
         updateChart(val) {
@@ -727,7 +768,7 @@
             
             const min = Math.min(...this.chartData);
             const max = Math.max(...this.chartData);
-            const range = max - min || 0.01;
+            const range = max - min || 0.0001;
             const padding = 20;
 
             ctx.clearRect(0,0,w,h);
@@ -744,8 +785,6 @@
 
             // Line
             ctx.beginPath();
-            let lastX = 0;
-            let lastY = 0;
             
             this.chartData.forEach((v, i) => {
                 const x = (i / (this.chartData.length - 1)) * w;
@@ -753,16 +792,12 @@
                 const y = h - padding - (normalized * (h - padding*2));
                 
                 if(i===0) ctx.moveTo(x,y);
-                else {
-                    // Smooth curve
-                    const cp1x = lastX + (x - lastX) / 2;
-                    ctx.bezierCurveTo(cp1x, lastY, cp1x, y, x, y);
-                }
-                lastX = x; lastY = y;
+                else ctx.lineTo(x, y); // Straight lines for "jagged" realistic financial look
             });
             
             ctx.strokeStyle = "#26a17b";
-            ctx.lineWidth = 3;
+            ctx.lineWidth = 2;
+            ctx.lineJoin = 'round';
             ctx.shadowBlur = 10;
             ctx.shadowColor = "rgba(38, 161, 123, 0.5)";
             ctx.stroke();
@@ -774,12 +809,6 @@
             grad.addColorStop(0, "rgba(38, 161, 123, 0.2)");
             grad.addColorStop(1, "rgba(38, 161, 123, 0)");
             ctx.fillStyle = grad;
-            ctx.fill();
-            
-            // End Dot
-            ctx.beginPath();
-            ctx.arc(lastX, lastY, 4, 0, Math.PI*2);
-            ctx.fillStyle = "#fff";
             ctx.fill();
         },
         
