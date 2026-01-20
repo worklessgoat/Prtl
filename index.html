@@ -475,15 +475,12 @@
     
     const Engine = {
         // --- CONFIGURATION ---
-        // This date is FIXED. The profit is calculated from this moment.
-        // This ensures if you refresh, the money doesn't reset.
-        START_TIMESTAMP: new Date("2026-01-20T00:00:00").getTime(), 
-        
-        START_BALANCE: 5010.00,
+        bootTime: Date.now(), // Track when session started
+        START_BALANCE: 5010.00, // FIXED EXACT START
         
         // Target: $180/week (Midpoint of 100-260)
         // $180 / 7 days / 24 hours / 60 mins / 60 seconds
-        GROWTH_PER_MS: 0.000297619, // Approx $25.71 per day
+        GROWTH_PER_MS: 0.000297619, 
         
         // State
         chartData: [],
@@ -509,20 +506,17 @@
         // --- CORE MATH ---
         getCurrentBalance() {
             const now = Date.now();
-            // If we are "before" the start date (unlikely in prod but possible in test), treat as 0 diff
-            // Actually, let's assume the user started "Staking" 2 days ago to show some profit immediately
-            const simStart = now - (2 * 24 * 60 * 60 * 1000); // 48 hours ago
-            
-            const timeDiff = now - simStart; 
+            // Start counting PROFIT from the moment the page opens (bootTime)
+            // This ensures balance starts exactly at START_BALANCE (5010.00)
+            const timeDiff = now - this.bootTime; 
             const organicGrowth = timeDiff * this.GROWTH_PER_MS;
             
             // Add "Breathing" Noise (Sine Wave)
-            // This makes the number go up and down slightly but always trend up
             const noise = (Math.sin(now / 2000) * 0.05) + (Math.cos(now / 500) * 0.02);
             
             return {
                 total: this.START_BALANCE + organicGrowth + noise,
-                pnlToday: (organicGrowth / 48) * (new Date().getHours() / 24) // Rough "Today" estimate
+                pnlToday: 0.35 + (organicGrowth) // Small fake start PNL
             };
         },
 
@@ -696,17 +690,21 @@
 
         // --- CANVAS & CHARTS ---
         genHistory() {
-            // Generate 60 points representing the last 60 minutes
+            // FIX: Generate "fake" history that ends exactly at the START_BALANCE
+            // This ensures the chart looks good, but the number is correct (5010)
             let now = Date.now();
-            let simStart = now - (2 * 24 * 60 * 60 * 1000);
             
-            for(let i=0; i<60; i++) {
-                // Go back in time
-                let t = now - ((60 - i) * 60000); // Minutes ago
-                let diff = t - simStart;
-                let growth = diff * this.GROWTH_PER_MS;
-                let noise = (Math.sin(t / 2000) * 0.05) + (Math.cos(t / 500) * 0.02);
-                this.chartData.push(this.START_BALANCE + growth + noise);
+            for(let i=60; i>0; i--) {
+                // Calculate BACKWARDS from 5010
+                // Value = 5010 - (growth * minutes_ago)
+                let timeOffset = i * 60000; // minutes ago in ms
+                let growthSinceThen = timeOffset * this.GROWTH_PER_MS;
+                
+                let val = this.START_BALANCE - growthSinceThen;
+                
+                // Add noise
+                let noise = (Math.sin(i) * 0.05);
+                this.chartData.push(val + noise);
             }
         },
 
