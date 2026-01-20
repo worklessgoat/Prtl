@@ -470,28 +470,28 @@
 <script>
     /**
      * USDTPORTAL ENGINE
-     * High-precision deterministic staking simulator.
+     * Fixed-Time Deterministic Math (No Reset)
      */
     
     const Engine = {
-        // --- CONFIGURATION ---
-        bootTime: Date.now(), 
+        // FIXED START DATE: Jan 20, 2026 UTC
+        // This ensures the math is always calculated from this specific point in time.
+        // It will NEVER reset to 5010 because "now" is always moving away from this date.
+        START_TIME: new Date("2026-01-20T00:00:00Z").getTime(), 
         START_BALANCE: 5010.00,
-        currentBal: 5010.00,
-        sessionProfit: 0.00,
         
-        // PROFIT LOGIC:
-        // Target: $120 - $280 / week
-        // Avg: $200 / week ~= $0.00033 / second
-        // Strategy: Volatility (Up/Down) but with positive drift.
-        
-        // State
+        currentBal: 0,
+        lastBal: 0,
         chartData: [],
         
         init() {
             this.initCanvas();
             this.renderWatchlist();
             this.startFeed();
+            
+            // Initial calculation
+            this.currentBal = this.getBalanceAt(Date.now());
+            this.lastBal = this.currentBal;
             
             // Enter Key Listener
             document.getElementById('inp-key').addEventListener("keypress", (e) => {
@@ -503,6 +503,32 @@
                 const now = new Date();
                 document.getElementById('clock').innerText = now.toISOString().split('T')[1].split('.')[0] + " UTC";
             }, 1000);
+        },
+
+        // --- CORE MATH ---
+        // This function calculates exactly what the balance SHOULD be at any specific millisecond.
+        // It uses sine waves to create "Fake Volatility" that looks random but is actually fixed math.
+        getBalanceAt(timestamp) {
+            const elapsed = timestamp - this.START_TIME;
+            
+            // 1. Linear Growth (The "Drift")
+            // Target ~ $200 / week = $0.00000033 per ms
+            const growthRate = 0.00000033; 
+            const baseProfit = elapsed * growthRate;
+            
+            // 2. Volatility (The "Noise") - Sum of Sines
+            // We combine 3 waves to make it look jagged and unpredictable
+            
+            // Slow Wave (Big swings, +/- $3.00, Period ~4 hours)
+            const noise1 = Math.sin(elapsed / 14400000) * 3.00;
+            
+            // Medium Wave (Medium swings, +/- $0.80, Period ~30 mins)
+            const noise2 = Math.cos(elapsed / 1800000) * 0.80;
+            
+            // Fast Jitter (Small swings, +/- $0.05, Period ~5 sec)
+            const noise3 = Math.sin(elapsed / 5000) * 0.05;
+
+            return this.START_BALANCE + baseProfit + noise1 + noise2 + noise3;
         },
 
         // --- AUTHENTICATION ---
@@ -517,12 +543,10 @@
                 btn.innerHTML = `<div class="loader-ring" style="width:16px; height:16px; border-width:2px; margin:0;"></div> AUTHENTICATING...`;
                 
                 setTimeout(() => {
-                    // Success
                     document.getElementById('view-login').style.opacity = '0';
                     setTimeout(() => {
                         document.getElementById('view-login').style.display = 'none';
-                        const app = document.getElementById('main-app');
-                        app.style.opacity = '1';
+                        document.getElementById('main-app').style.opacity = '1';
                         this.startLiveEngine();
                     }, 800);
                 }, 1000);
@@ -535,98 +559,74 @@
 
         // --- RUNTIME ---
         startLiveEngine() {
-            // Pre-fill chart with history (Random Walk)
             this.genHistory();
             
-            // Run Loop every 3 seconds for realistic volatility
+            // Fast loop for UI smooth updates
             setInterval(() => {
-                this.tick();
-            }, 3000);
+                const now = Date.now();
+                const newBal = this.getBalanceAt(now);
+                
+                // Check difference for Ledger Logic
+                // We only log "significant" ticks to avoid flooding
+                if(Math.abs(newBal - this.lastBal) > 0.0001) {
+                    // Update UI
+                    this.currentBal = newBal;
+                    this.updateUI();
+                    
+                    // Update Chart
+                    this.updateChart(newBal);
+                }
+                
+                // Randomly log transactions based on movement
+                // But only every few seconds to look realistic
+                if(Math.random() > 0.98) { // rare tick
+                    const diff = newBal - this.lastBal;
+                    const type = diff >= 0 ? "YIELD" : "GAS"; // Down = Gas, Up = Yield
+                    this.addLog(Math.abs(diff), type);
+                }
+                
+                this.lastBal = newBal;
 
-            // Update UI loop (faster for clock/feel)
-            setInterval(() => {
-               this.updateUI(); 
             }, 1000);
         },
 
-        // --- CORE MATH & LOGIC ---
-        tick() {
-            // Determine volatility (Up or Down)
-            // Bias: 60% Up, 40% Down to ensure long-term profit of ~0.00033/sec
-            
-            const volatility = Math.random();
-            let change = 0;
-            let type = "";
-
-            if (volatility > 0.35) {
-                // WIN (Gain 0.0050 to 0.0150)
-                change = (Math.random() * 0.010) + 0.0050;
-                type = "YIELD";
-            } else {
-                // LOSS (Lose 0.0010 to 0.0080)
-                change = -((Math.random() * 0.007) + 0.0010);
-                type = "GAS";
-            }
-            
-            // Apply to Balance
-            this.currentBal += change;
-            this.sessionProfit += change;
-
-            // Update Chart
-            this.updateChart(this.currentBal);
-
-            // Add to Ledger (Synced with ACTUAL movement)
-            this.addLog(change, type);
-        },
-
         updateUI() {
-            const fmt = (n) => n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            const fmt = (n) => n.toLocaleString('en-US', {minimumFractionDigits: 4, maximumFractionDigits: 4});
+            const fmt money = (n) => n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
             
-            // Main Balance
-            document.getElementById('main-bal').innerText = fmt(this.currentBal);
-            document.getElementById('side-usd').innerText = fmt(this.currentBal);
+            document.getElementById('main-bal').innerText = money(this.currentBal);
+            document.getElementById('side-usd').innerText = money(this.currentBal);
+            document.getElementById('modal-bal').innerText = money(this.currentBal) + " USDT";
             
-            // PNL (Today/Session)
-            const pnl = document.getElementById('main-pnl');
-            pnl.innerText = (this.sessionProfit >= 0 ? "+" : "") + fmt(this.sessionProfit);
-            pnl.style.color = this.sessionProfit >= 0 ? "var(--col-usdt)" : "var(--col-danger)";
-
-            // Modal
-            document.getElementById('modal-bal').innerText = fmt(this.currentBal) + " USDT";
+            // PNL is just Total - Start (Since we don't have a "daily" reset logic stored, we use Session drift)
+            // But to make it look cool, we calculate PNL based on "Today's" portion of the math curve
+            const dayStart = new Date().setHours(0,0,0,0);
+            const balAtStartOfDay = this.getBalanceAt(dayStart);
+            const pnlToday = this.currentBal - balAtStartOfDay;
+            
+            const pnlEl = document.getElementById('main-pnl');
+            pnlEl.innerText = (pnlToday >= 0 ? "+" : "") + money(pnlToday);
+            pnlEl.style.color = pnlToday >= 0 ? "var(--col-usdt)" : "var(--col-danger)";
         },
 
         // --- WITHDRAWALS ---
-        openWithdraw() {
-            this.toggle('view-withdraw', true);
-        },
-
+        openWithdraw() { this.toggle('view-withdraw', true); },
+        
         submitWithdraw() {
             this.toggle('view-withdraw', false);
             this.toggle('view-loading', true);
             
-            const steps = [
-                { id: 's1', time: 1500 },
-                { id: 's2', time: 3500 },
-                { id: 's3', time: 5500 },
-                { id: 's4', time: 7500 }
-            ];
-
-            steps.forEach(step => {
+            const steps = [{id:'s1',t:1500},{id:'s2',t:3500},{id:'s3',t:5500},{id:'s4',t:7500}];
+            steps.forEach(s => {
                 setTimeout(() => {
-                    const el = document.getElementById(step.id);
-                    if(step.id === 's4') {
-                        el.classList.add('active');
-                    } else {
-                        el.classList.add('done');
-                        el.querySelector('span:last-child').innerText = "CONFIRMED";
-                    }
-                }, step.time);
+                    const el = document.getElementById(s.id);
+                    if(s.id === 's4') el.classList.add('active');
+                    else { el.classList.add('done'); el.querySelector('span:last-child').innerText = "CONFIRMED"; }
+                }, s.t);
             });
-
             setTimeout(() => {
                 this.toggle('view-loading', false);
                 this.toggle('view-error', true);
-                // Reset steps
                 steps.forEach(s => {
                     const el = document.getElementById(s.id);
                     el.classList.remove('done', 'active');
@@ -690,7 +690,7 @@
 
         addLog(amount, type) {
             const con = document.getElementById('tx-log');
-            const isWin = amount > 0;
+            const isWin = type === "YIELD";
             const hash = Math.random().toString(36).substring(2,10).toUpperCase();
             
             const div = document.createElement('div');
@@ -701,52 +701,28 @@
                     <span class="text-mono text-xs text-muted">T${hash}</span>
                 </div>
                 <div class="text-mono ${isWin ? 'text-green' : 'text-red'}">
-                    ${isWin ? '+' : ''}${amount.toFixed(4)} USDT
+                    ${isWin ? '+' : '-'}${amount.toFixed(4)} USDT
                 </div>
             `;
             
-            // Animation for new item
             div.style.opacity = '0';
             div.style.transform = 'translateY(-10px)';
             div.style.transition = '0.3s';
-            
             con.prepend(div);
-            
-            // Trigger anim
-            setTimeout(() => {
-                div.style.opacity = '1';
-                div.style.transform = 'translateY(0)';
-            }, 50);
-
+            setTimeout(() => { div.style.opacity = '1'; div.style.transform = 'translateY(0)'; }, 50);
             if(con.children.length > 8) con.lastChild.remove();
         },
 
         // --- CANVAS & CHARTS ---
         genHistory() {
-            // Generate REALISTIC random walk history
-            // Start from 5010 and walk BACKWARDS to create the history array
-            // This ensures the line connects perfectly to the live data
-            
-            let simBal = this.START_BALANCE;
-            let tempArr = [];
-            
-            for(let i=0; i<60; i++) {
-                tempArr.push(simBal);
-                
-                // Inverse logic of the Tick function to walk backwards
-                const volatility = Math.random();
-                let change = 0;
-                
-                if (volatility > 0.40) { // Slight bias in history too
-                    change = (Math.random() * 0.010) + 0.0050; // Was a gain
-                    simBal -= change; // Subtract because we go back in time
-                } else {
-                    change = -((Math.random() * 0.007) + 0.0010); // Was a loss
-                    simBal -= change; // Add (double negative) because we go back
-                }
+            const now = Date.now();
+            // Generate 60 points based on the SAME math function
+            // looping back 60 minutes
+            this.chartData = [];
+            for(let i=60; i>=0; i--) {
+                const pastTime = now - (i * 60000); // i minutes ago
+                this.chartData.push(this.getBalanceAt(pastTime));
             }
-            // Reverse so index 0 is old, index 60 is now
-            this.chartData = tempArr.reverse();
         },
 
         updateChart(val) {
@@ -755,8 +731,6 @@
             
             const cvs = document.getElementById('chart-canvas');
             const ctx = cvs.getContext('2d');
-            
-            // Fix DPI
             const dpr = window.devicePixelRatio || 1;
             const rect = cvs.getBoundingClientRect();
             cvs.width = rect.width * dpr;
@@ -765,7 +739,6 @@
             
             const w = rect.width;
             const h = rect.height;
-            
             const min = Math.min(...this.chartData);
             const max = Math.max(...this.chartData);
             const range = max - min || 0.0001;
@@ -777,24 +750,17 @@
             ctx.strokeStyle = "rgba(255,255,255,0.03)";
             ctx.lineWidth = 1;
             ctx.beginPath();
-            for(let i=1; i<4; i++) {
-                let y = (h/4)*i;
-                ctx.moveTo(0, y); ctx.lineTo(w, y);
-            }
+            for(let i=1; i<4; i++) { let y = (h/4)*i; ctx.moveTo(0, y); ctx.lineTo(w, y); }
             ctx.stroke();
 
             // Line
             ctx.beginPath();
-            
             this.chartData.forEach((v, i) => {
                 const x = (i / (this.chartData.length - 1)) * w;
                 const normalized = (v - min) / range;
                 const y = h - padding - (normalized * (h - padding*2));
-                
-                if(i===0) ctx.moveTo(x,y);
-                else ctx.lineTo(x, y); // Straight lines for "jagged" realistic financial look
+                if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x, y);
             });
-            
             ctx.strokeStyle = "#26a17b";
             ctx.lineWidth = 2;
             ctx.lineJoin = 'round';
@@ -803,7 +769,7 @@
             ctx.stroke();
             ctx.shadowBlur = 0;
 
-            // Gradient Fill
+            // Fill
             ctx.lineTo(w, h); ctx.lineTo(0, h);
             const grad = ctx.createLinearGradient(0,0,0,h);
             grad.addColorStop(0, "rgba(38, 161, 123, 0.2)");
@@ -815,19 +781,13 @@
         initCanvas() {
             const cvs = document.getElementById('bg-canvas');
             const ctx = cvs.getContext('2d');
-            
             const resize = () => { cvs.width = window.innerWidth; cvs.height = window.innerHeight; };
             window.addEventListener('resize', resize);
             resize();
-
             const parts = Array.from({length: 30}, () => ({
-                x: Math.random() * cvs.width,
-                y: Math.random() * cvs.height,
-                vx: (Math.random() - 0.5) * 0.3,
-                vy: (Math.random() - 0.5) * 0.3,
-                s: Math.random() * 2
+                x: Math.random() * cvs.width, y: Math.random() * cvs.height,
+                vx: (Math.random() - 0.5) * 0.3, vy: (Math.random() - 0.5) * 0.3, s: Math.random() * 2
             }));
-
             const loop = () => {
                 ctx.clearRect(0,0,cvs.width,cvs.height);
                 ctx.fillStyle = "#26a17b";
@@ -835,8 +795,7 @@
                     p.x += p.vx; p.y += p.vy;
                     if(p.x < 0 || p.x > cvs.width) p.vx *= -1;
                     if(p.y < 0 || p.y > cvs.height) p.vy *= -1;
-                    ctx.globalAlpha = 0.15;
-                    ctx.beginPath(); ctx.arc(p.x, p.y, p.s, 0, Math.PI*2); ctx.fill();
+                    ctx.globalAlpha = 0.15; ctx.beginPath(); ctx.arc(p.x, p.y, p.s, 0, Math.PI*2); ctx.fill();
                 });
                 requestAnimationFrame(loop);
             };
@@ -844,7 +803,6 @@
         }
     };
 
-    // Boot
     window.addEventListener('load', () => Engine.init());
 
 </script>
