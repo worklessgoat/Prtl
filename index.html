@@ -509,6 +509,7 @@
             this.initCanvas();
             this.renderWatchlist();
             this.startFeed();
+            this.updateUI(); // FIX: Updates the balance immediately so it's correct before the screen is revealed.
             
             // Enter Key Listener
             document.getElementById('inp-key').addEventListener("keypress", (e) => {
@@ -554,6 +555,7 @@
         startLiveEngine() {
             // Pre-fill chart with history (Random Walk)
             this.genHistory();
+            this.renderChart(); // FIX: Immediately render the chart so it is not empty.
             
             // Run Loop every 3 seconds for realistic volatility
             setInterval(() => {
@@ -768,7 +770,10 @@
         updateChart(val) {
             this.chartData.push(val);
             if(this.chartData.length > 60) this.chartData.shift();
-            
+            this.renderChart();
+        },
+
+        renderChart() {
             const cvs = document.getElementById('chart-canvas');
             const ctx = cvs.getContext('2d');
             
